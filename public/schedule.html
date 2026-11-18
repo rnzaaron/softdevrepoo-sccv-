@@ -1,0 +1,68 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Class schedule</title></head>
+<body><nav id="nav"></nav><main><h1 id="title"></h1><p class="subhead" id="scheduleIntro"></p><div id="box"></div></main>
+<script src="common.js"></script><script>
+// Schedule queries are restricted on the server to the user's teaching assignments or section.
+init('Class schedule');
+let cachedOptions = { sections: [], subjects: [], teachers: [], rooms: [] };
+
+async function load() {
+  try {
+    const [schedules, options] = await Promise.all([
+      api('schedules'),
+      api('options').catch(() => ({ sections: [], subjects: [], teachers: [], rooms: [] }))
+    ]);
+    cachedOptions = options;
+
+    document.getElementById('scheduleIntro').textContent = ['student', 'parent'].includes(user.role)
+      ? `Personalized schedule for ${user.childSection || user.section || 'your section'}.`
+      : 'Teaching assignments and substitute coverage.';
+
+    const admin = user.role === 'admin';
+    const staff = ['admin', 'adviser'].includes(user.role);
+
+    const controls = admin ? `<section class="card"><div class="toolbar"><h2>Schedule planner</h2><button onclick="generate()">Generate from assignments</button></div><p class="muted">Generation replaces the current timetable and avoids teacher, room, and section overlaps.</p>
+      <h3>Add a class manually</h3>
+      <form onsubmit="addClass(event)">
+        <div class="field"><label for="subject">Subject</label><select id="subject" required>${options.subjects.length ? options.subjects.map(s => `<option value="${esc(s.name)}">${esc(s.name)}${s.code ? ` (${esc(s.code)})` : ''}</option>`).join('') : '<option value="" selected disabled>No subjects found</option>'}</select></div>
+        <div class="field"><label for="teacherEmail">Teacher</label><select id="teacherEmail" required>${options.teachers.length ? options.teachers.map(t => `<option value="${esc(t.email)}">${esc(t.name)} · ${esc(t.email)}</option>`).join('') : '<option value="" selected disabled>No teachers found</option>'}</select></div>
+        <div class="field"><label for="section">Section</label><select id="section" required>${options.sections.length ? options.sections.map(sec => `<option value="${esc(sec.name)}">${esc(sec.name)}</option>`).join('') : '<option value="" selected disabled>No sections found</option>'}</select></div>
+        <div class="field"><label for="room">Room</label><select id="room" required>${options.rooms.length ? options.rooms.map(r => `<option value="${esc(r.name)}">${esc(r.name)}${r.capacity ? ` (Cap: ${r.capacity})` : ''}</option>`).join('') : '<option value="" selected disabled>No rooms found</option>'}</select></div>
+        <div class="field"><label for="day">Day</label><select id="day" required><option>Mon</option><option>Tue</option><option>Wed</option><option>Thu</option><option>Fri</option><option>Sat</option></select></div>
+        <div class="field"><label for="start">Start</label><input id="start" type="time" value="08:00" required></div>
+        <div class="field"><label for="end">End</label><input id="end" type="time" value="09:00" required></div>
+        <br><button type="submit">Add class</button><div id="error" class="err" role="alert"></div>
+      </form></section>` : '';
+
+    const filterBar = schedules.length ? `<div class="toolbar"><input class="search-box" id="scheduleSearch" placeholder="🔍 Search timetable (subject, teacher, room, day...)"></div>` : '';
+
+    const table = schedules.length ? `<div class="card" style="overflow:auto">${filterBar}<table id="scheduleTable"><thead><tr><th>Day</th><th>Time</th><th>Subject</th><th>Section</th><th>Room</th><th>Instructor</th><th>Teacher status</th>${staff ? '<th>Absence / coverage</th>' : ''}</tr></thead><tbody>${schedules.map(row => `<tr><td><b>${esc(row.day)}</b></td><td>${esc(row.start)}–${esc(row.end)}</td><td>${esc(row.subject)}</td><td>${esc(row.section)}</td><td>${esc(row.room)}</td><td>${esc(row.substituteName || row.teacherName || row.teacherEmail)}${row.substituteEmail ? `<br><small class="muted">Covering for ${esc(row.teacherName || row.teacherEmail)}</small>` : ''}</td><td>${badge(row.teacherStatus || (row.substituteEmail ? 'Substitute assigned' : 'Present'))}</td>${staff ? `<td>${row.substituteEmail ? badge('Substitute assigned') : `<button class="secondary" onclick="substitute('${row._id}')">${row.teacherStatus === 'Absent' ? 'Assign substitute' : 'Mark absent / assign cover'}</button>`}</td>` : ''}</tr>`).join('')}</tbody></table></div>` : '<div class="card empty">No classes found for this account.</div>';
+
+    document.getElementById('box').innerHTML = controls + table;
+    makeTableSearchable('scheduleSearch', '#scheduleTable');
+  } catch (error) { document.getElementById('box').innerHTML = `<p class="err">${esc(error.error || error.message)}</p>`; }
+}
+
+async function addClass(event) {
+  event.preventDefault();
+  const fields = Object.fromEntries(['subject', 'teacherEmail', 'section', 'room', 'day', 'start', 'end'].map(key => [key, (document.getElementById(key)?.value || '').trim()]));
+  try { await api('schedules', 'POST', fields); await load(); }
+  catch (error) { document.getElementById('error').textContent = error.error || 'Could not add class.'; }
+}
+
+async function generate() {
+  if (!confirm('Replace the current timetable with a conflict-free schedule generated from teacher assignments?')) return;
+  try { const result = await api('schedules/generate', 'POST', {}); alert(`Generated ${result.count} class meetings.`); await load(); }
+  catch (error) { alert(error.error || 'Schedule generation failed.'); }
+}
+
+async function substitute(id) {
+  if (!confirm('Mark this instructor absent and assign an available substitute?')) return;
+  try {
+    const result = await api('substitute', 'POST', { id });
+    alert(result.message || (result.substitute ? `Substitute assigned: ${result.substitute}` : 'Updated.'));
+    await load();
+  } catch (error) { alert(error.error || 'Action failed.'); }
+}
+
+load();
+</script></body></html>

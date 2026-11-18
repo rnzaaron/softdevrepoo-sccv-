@@ -1,0 +1,36 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Document tracking</title></head>
+<body><nav id="nav"></nav><main><h1 id="title"></h1><p class="subhead">Track each student's documents. Only administrators can change a status.</p><div id="box"></div></main>
+<script src="common.js"></script><script>
+// Tracks documents created at registration. Creating a document only makes it "Pending"; status changes are always a deliberate admin action.
+init('Document tracking');
+const $ = id => document.getElementById(id);
+const STATUSES = ['Pending', 'Submitted', 'Processing', 'Ready for Claiming', 'Released', 'Rejected'];
+const fmt = d => d ? new Date(d).toLocaleString() : '—';
+let statusFilter = '';
+async function load() {
+  try {
+    const admin = user.role === 'admin';
+    const [docs, opts] = await Promise.all([api('student-documents' + (statusFilter ? '?status=' + encodeURIComponent(statusFilter) : '')), admin ? api('options') : { students: [] }]);
+    $('box').innerHTML = (admin ? `<section class="card"><h2>Add a document (e.g. Transcript of Records)</h2>
+      <label class="field">Student<select id="addStudent">${opts.students.map(s => `<option value="${esc(s.studentId)}">${esc(s.studentId)} — ${esc(s.name)}</option>`).join('')}</select></label>
+      <label class="field">Document<input id="addName" value="Transcript of Records"></label> <button onclick="addDoc()">Add document</button><div id="msg" class="err"></div></section>` : '') +
+      `<section class="card" style="overflow:auto"><div class="toolbar"><select onchange="statusFilter=this.value;load()"><option value="">All statuses</option>${STATUSES.map(s => `<option ${s === statusFilter ? 'selected' : ''}>${s}</option>`).join('')}</select>
+      <input class="search-box" id="docSearch" placeholder="🔍 Search by student ID, name or document..."></div>
+      <table id="docTable"><thead><tr><th>Student ID</th><th>Student</th><th>Document</th><th>Submitted</th><th>Status</th><th>Notes</th><th>Last updated</th><th>History</th>${admin ? '<th>Update</th>' : ''}</tr></thead><tbody>
+      ${docs.map(d => `<tr><td>${esc(d.studentId)}</td><td>${esc(d.studentName)}</td><td><b>${esc(d.name)}</b></td><td>${fmt(d.submittedAt)}</td><td>${badge(d.status)}</td><td>${esc(d.notes)}</td><td>${fmt(d.updatedAt)}</td>
+      <td><details><summary>${d.history.length}</summary>${d.history.map(h => `<small>${esc(h.status)} — ${esc(h.by)}, ${fmt(h.at)}</small>`).join('<br>')}</details></td>
+      ${admin ? `<td><select id="st-${d._id}">${STATUSES.map(s => `<option ${s === d.status ? 'selected' : ''}>${s}</option>`).join('')}</select><input id="nt-${d._id}" value="${esc(d.notes)}" placeholder="Notes"><button onclick="saveDoc('${d._id}')">Save</button></td>` : ''}</tr>`).join('')}</tbody></table>
+      ${docs.length ? '' : '<p class="empty">No documents found.</p>'}</section>`;
+    makeTableSearchable('docSearch', '#docTable');
+  } catch (e) { $('box').innerHTML = `<p class="err">${esc(e.error || e.message)}</p>`; }
+}
+async function saveDoc(id) {
+  try { await api('student-documents/' + id, 'PUT', { status: $('st-' + id).value, notes: $('nt-' + id).value }); await load(); }
+  catch (e) { alert(e.error || 'Could not update.'); }
+}
+async function addDoc() {
+  try { await api('student-documents', 'POST', { studentId: $('addStudent').value, name: $('addName').value }); await load(); }
+  catch (e) { $('msg').textContent = e.error || 'Could not add.'; }
+}
+load();
+</script></body></html>
